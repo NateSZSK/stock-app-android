@@ -8,7 +8,7 @@ source.include_exts = py,png,jpg,kv,atlas
 
 version = 1.0
 
-requirements = python3,kivy==2.2.1,requests,yfinance,pandas,numpy,lxml,html5lib,beautifulsoup4,certifi,charset-normalizer,idna,urllib3,pytz,multitasking
+requirements = python3,kivy==2.2.1,requests
 
 orientation = portrait
 fullscreen = 0
