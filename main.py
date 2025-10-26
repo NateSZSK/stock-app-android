@@ -7,7 +7,6 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.clock import Clock
 from kivy.graphics import Color, Rectangle
-import yfinance as yf
 import requests
 from datetime import datetime
 import threading
@@ -37,11 +36,14 @@ class StockCard(BoxLayout):
         info_box.add_widget(ticker_label)
         
         price_box = BoxLayout(orientation='vertical', size_hint_x=0.38)
-        price_str = f'{price:,.2f} {currency}' if currency == 'KRW' else f'${price:,.2f}'
+        if currency == 'KRW':
+            price_str = f'{int(price):,} KRW'
+        else:
+            price_str = f'${price:.2f}'
         price_label = Label(text=price_str, font_size='18sp', bold=True, color=(1, 1, 1, 1), halign='right')
         
         change_color = (0.9, 0.3, 0.3, 1) if change >= 0 else (0.3, 0.5, 0.9, 1)
-        change_text = f'{change:+,.2f} ({change_percent:+.2f}%)'
+        change_text = f'{change:+.2f} ({change_percent:+.2f}%)'
         change_label = Label(text=change_text, font_size='15sp', color=change_color, halign='right')
         
         price_label.bind(size=price_label.setter('text_size'))
@@ -81,7 +83,7 @@ class ExchangeCard(BoxLayout):
         elif 'CNY' in label:
             rate_text = f'{rate:.4f} CNY'
         else:
-            rate_text = f'${rate:.4f}'
+            rate_text = f'{rate:.4f}'
         
         rate_widget = Label(text=rate_text, font_size='20sp', bold=True, color=(0.5, 0.8, 0.5, 1), halign='right')
         
@@ -178,7 +180,7 @@ class StockApp(App):
         main_layout.bind(pos=self.update_bg, size=self.update_bg)
         
         header = Label(text='My Portfolio', font_size='28sp', size_hint_y=None, height=60, bold=True, color=(1, 1, 1, 1))
-        self.update_time_label = Label(text='Loading...', font_size='12sp', size_hint_y=None, height=30, color=(0.7, 0.7, 0.7, 1))
+        self.update_time_label = Label(text='Tap Refresh', font_size='12sp', size_hint_y=None, height=30, color=(0.7, 0.7, 0.7, 1))
         
         scroll = ScrollView(size_hint=(1, 1))
         self.content_layout = BoxLayout(orientation='vertical', spacing=10, size_hint_y=None)
@@ -200,9 +202,6 @@ class StockApp(App):
         main_layout.add_widget(self.update_time_label)
         main_layout.add_widget(scroll)
         main_layout.add_widget(btn_row)
-        
-        self.load_data()
-        Clock.schedule_interval(lambda dt: self.load_data(), 60)
         
         return main_layout
     
@@ -283,38 +282,57 @@ class StockApp(App):
             Clock.schedule_once(lambda dt: self.update_ui(all_data, usd_krw, cny_krw, usd_cny))
             
         except Exception as e:
-            print(f"Fetch error: {e}")
             Clock.schedule_once(lambda dt: self.show_error(str(e)))
     
     def get_stock_price(self, ticker, name):
         try:
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="1d")
-            info = stock.info
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=15)
             
-            if not hist.empty:
-                current_price = hist['Close'].iloc[-1]
-                previous_close = info.get('previousClose', current_price)
-                change = current_price - previous_close
-                change_percent = (change / previous_close * 100) if previous_close else 0
-                currency = info.get('currency', 'USD')
-                
-                return {
-                    'name': name,
-                    'ticker': ticker,
-                    'price': current_price,
-                    'change': change,
-                    'change_percent': change_percent,
-                    'currency': currency
-                }
+            if response.status_code != 200:
+                return None
+            
+            data = response.json()
+            
+            if 'chart' not in data or not data['chart'].get('result'):
+                return None
+            
+            result = data['chart']['result'][0]
+            meta = result.get('meta', {})
+            
+            current_price = meta.get('regularMarketPrice')
+            previous_close = meta.get('previousClose') or meta.get('chartPreviousClose')
+            currency = meta.get('currency', 'USD')
+            
+            if current_price is None or previous_close is None:
+                return None
+            
+            change = current_price - previous_close
+            change_percent = (change / previous_close * 100) if previous_close else 0
+            
+            return {
+                'name': name,
+                'ticker': ticker,
+                'price': float(current_price),
+                'change': float(change),
+                'change_percent': float(change_percent),
+                'currency': currency
+            }
+            
         except Exception as e:
-            print(f"Error getting {ticker}: {e}")
-        return None
+            return None
     
     def get_exchange_rate(self, from_curr, to_curr):
         try:
             url = f"https://api.exchangerate-api.com/v4/latest/{from_curr}"
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, timeout=15)
+            
+            if response.status_code != 200:
+                return 0
+            
             data = response.json()
             return data['rates'].get(to_curr, 0)
         except:
@@ -373,12 +391,11 @@ class StockApp(App):
         if usd_cny:
             self.content_layout.add_widget(ExchangeCard('USD/CNY', usd_cny))
         
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.now().strftime('%H:%M:%S')
         self.update_time_label.text = f'Updated: {now}'
     
     def show_error(self, error):
-        self.update_time_label.text = f'Error: {error}'
+        self.update_time_label.text = 'Error loading data'
 
 if __name__ == '__main__':
     StockApp().run()
-  
